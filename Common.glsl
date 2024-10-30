@@ -35,7 +35,7 @@ struct TraceResult {
                 // flags bit 1:   surface condition:  true if distance to surface is small < error threshold
                 // flags bit 2:   max. iter. condition:  true if none of the above, exited the loop because i > maxsteps
                 // bit 2+: material id bits
-    int steps;  
+    int steps;
 };  
 
 const float pi = 3.1415926535897932384626433832795;
