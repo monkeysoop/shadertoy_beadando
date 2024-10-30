@@ -16,8 +16,19 @@
 
 #endif
 
-const Material materials[6] = Material[](
-    Material(vec3(0.2, 0.0, 0.0), 0.2, 0.2, 0.02),     // Plastic
+#define NUM_OF_REFLECTIONS 6
+
+#define IMAGE_MAX_ITERS 300
+#define SHADOW_MAX_ITERS 100
+
+#define MAX_DIST 1000.0
+
+#define NUM_OF_MATERIALS 6
+#define NUM_OF_LIGHTS 3
+
+
+const Material materials[NUM_OF_MATERIALS] = Material[](
+    Material(vec3(10.2, 0.0, 0.0), 0.2, 0.0, 0.02),     // Plastic
     Material(vec3(0.95, 0.93, 0.88), 0.1, 0.0, 0.95),  // Silver
     Material(vec3(1.0, 0.71, 0.29), 0.05, 0.0, 0.9),    // Polished Gold
     Material(vec3(0.8, 0.85, 0.88), 0.5, 0.0, 0.7),     // Brushed Aluminum
@@ -25,10 +36,13 @@ const Material materials[6] = Material[](
     Material(vec3(0.56, 0.57, 0.58), 1.0, 0.0, 0.75)   // Rough Iron
 );
 
-const Light lights[3] = Light[](
-    Light(vec3(10.0, 10.0, 0.0), vec3(1.0, 0.0, 0.0)), 
-    Light(vec3(0.0, 10.0, 0.0), vec3(0.0, 1.0, 0.0)), 
-    Light(vec3(0.0, 10.0, 10.0), vec3(0.0, 0.0, 1.0)));
+const Light lights[NUM_OF_LIGHTS] = Light[](
+    Light(vec3(10.0, 10.0, 0.0), vec3(10.0, 0.0, 0.0)), 
+    Light(vec3(0.0, 10.0, 0.0), vec3(0.0, 10.0, 0.0)), 
+    Light(vec3(0.0, 10.0, 10.0), vec3(0.0, 0.0, 1.0))
+);
+
+
 
 // stolen from: https://learnopengl.com/PBR/Lighting
 float DistributionGGX(vec3 N, vec3 H, float roughness) {
@@ -43,7 +57,6 @@ float DistributionGGX(vec3 N, vec3 H, float roughness) {
 
     return num / denom;
 }
-
 float GeometrySchlickGGX(float NdotV, float roughness) {
     float r = (roughness + 1.0);
     float k = (r * r) / 8.0;
@@ -53,7 +66,6 @@ float GeometrySchlickGGX(float NdotV, float roughness) {
 
     return num / denom;
 }
-
 float GeometrySmith(vec3 N, vec3 V, vec3 L, float roughness) {
     float NdotV = max(dot(N, V), 0.0);
     float NdotL = max(dot(N, L), 0.0);
@@ -62,68 +74,10 @@ float GeometrySmith(vec3 N, vec3 V, vec3 L, float roughness) {
 
     return ggx1 * ggx2;
 }
-
 vec3 fresnelSchlick(float cosTheta, vec3 F0) {
     return F0 + (1.0 - F0) * pow(clamp(1.0 - cosTheta, 0.0, 1.0), 5.0);
 }
 
-vec3 BRDF(vec3 camPos, vec3 WorldPos, vec3 Normal, int mat_id, inout vec3 refl) {
-    vec3 albedo = materials[mat_id].color;
-    float roughness = materials[mat_id].roughness;
-    float emission_strength = materials[mat_id].emission_strength;
-    float metallic = materials[mat_id].metalness;
-
-
-    const float ao = 0.1;
-    const float reflection_attenuation = 1.0;
-
-    vec3 N = normalize(Normal);
-    vec3 V = normalize(camPos - WorldPos);
-
-    vec3 F0 = vec3(0.04);
-    F0 = mix(F0, albedo, metallic);
-
-    // reflectance equation
-    vec3 Lo = vec3(0.0);
-    for (int i = 0; i < 3; ++i) {
-        vec3 lightPosition = lights[i].position;
-        vec3 lightColor = lights[i].color;
-        // calculate per-light radiance
-        vec3 L = normalize(lightPosition - WorldPos);
-        vec3 H = normalize(V + L);
-        float dist = length(lightPosition - WorldPos);
-        float attenuation = 1.0 / (dist * dist);
-        vec3 radiance = lightColor * attenuation;
-
-        // cook-torrance brdf
-        float NDF = DistributionGGX(N, H, roughness);
-        float G = GeometrySmith(N, V, L, roughness);
-        vec3 F = fresnelSchlick(max(dot(H, V), 0.0), F0);
-
-        vec3 kS = F;
-        vec3 kD = vec3(1.0) - kS;
-        kD *= (1.0 - metallic);
-
-        vec3 numerator = NDF * G * F;
-        float denominator = 4.0 * max(dot(N, V), 0.0) * max(dot(N, L), 0.0) + 0.0001;
-        vec3 specular = numerator / denominator;
-
-        // add to outgoing radiance Lo
-        float NdotL = max(dot(N, L), 0.0);
-        Lo += (kD * albedo / pi + specular) * radiance * NdotL;
-    }
-
-    vec3 ambient = vec3(0.03) * albedo * ao;
-    vec3 color = ambient + Lo + albedo * emission_strength * max(dot(V, N), 0.0);
-
-    color = color / (color + vec3(1.0));
-    color = pow(color, vec3(1.0 / 2.2));
-
-    color *= refl;
-    refl *= fresnelSchlick(max(dot(V, N), 0.0), F0) * reflection_attenuation;
-
-    return color;
-}
 
 // Buffer A handels camera movement. Here we only read it
 Ray ReadCamera(vec2 fragCoord, out float diagInv) {
@@ -139,60 +93,57 @@ Ray ReadCamera(vec2 fragCoord, out float diagInv) {
     diagInv = 1.0 / length(iResolution.xy);
     vec2 px = (2.0 * fragCoord - iResolution.xy) * diagInv * 1.0;
 
-    return Ray(eye, 0.0, normalize(w + px.x * u + px.y * v), 1000.0);
+    return Ray(eye, 0.0, normalize(w + px.x * u + px.y * v), MAX_DIST);
 }
-// SDF Primitives (more on https://iquilezles.org/articles/distfunctions/)
 
+
+
+// SDF Primitives (more on https://iquilezles.org/articles/distfunctions/)
 float sdRoundBox(vec3 p, vec3 b, float r) {
     vec3 q = abs(p) - b + r;
     return length(max(q, 0.0)) + min(max(q.x, max(q.y, q.z)), 0.0) - r;
 }
-
 float sdBoxFrame(vec3 p, vec3 b, float e) {
     p = abs(p) - b;
     vec3 q = abs(p + e) - e;
     return min(min(length(max(vec3(p.x, q.y, q.z), 0.0)) + min(max(p.x, max(q.y, q.z)), 0.0), length(max(vec3(q.x, p.y, q.z), 0.0)) + min(max(q.x, max(p.y, q.z)), 0.0)), length(max(vec3(q.x, q.y, p.z), 0.0)) + min(max(q.x, max(q.y, p.z)), 0.0));
 }
-
 float sdCapsule(vec3 p, vec3 a, vec3 b, float r) {
     vec3 pa = p - a, ba = b - a;
     float h = clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0);
     return length(pa - ba * h) - r;
 }
-
 float sdSphere(vec3 p, float s) {
     return length(p) - s;
 }
-
 float sdBox(vec3 p, vec3 b) {
     vec3 d = abs(p) - b;
     return length(max(d, 0.0)) + min(max3(d.x, d.y, d.z), 0.0);
 }
 
-// SDF Operations
 
+
+// SDF Operations
 vec3 opRepLim(vec3 p, float c, in vec3 l) {
     return p - c * clamp(round(p / c), -l, l);
 }
 vec3 opRep(vec3 p, float s) {
     return mod(p + s * 0.5, s) - s * 0.5;
 }
-
 vec3 opSymX(vec3 p) {
     return vec3(abs(p.x), p.y, p.z);
 }
-
 vec3 opRepZ(vec3 p, float sz, float lo, float up) {
     return vec3(p.x, p.y, p.z - sz * clamp(round(p.z / sz), lo, up));
 }
-
 vec3 opRepXZ(vec3 p, float sx, float sz) {
     return vec3((mod(p.x + sx * 0.5, sx) - sx * 0.5), p.y, (mod(p.z + sz * 0.5, sz) - sz * 0.5));
 }
-
 float intersectPlane(Ray ray, vec3 q, vec3 n) {
     return dot(q - ray.P, n) / dot(ray.V, n);
 }
+
+
 
 float pendulum(float t) {
     // const float q = 0.0;                   // initial angle: 0
@@ -216,8 +167,9 @@ float pendulum(float t) {
     return theta;
 }
 
+
+
 // Signed Distance Function
-//float sdf(vec3 p) { return 0.0; }
 Value sdf(vec3 p) {
     const float freq = 2.0;
 
@@ -234,7 +186,7 @@ Value sdf(vec3 p) {
     float d = 10000.0;
     Value v = Value(10000.0, 0);
     v = Unite(v, Value(sdBoxFrame(p + vec3(0.0, -8.0, 0.0), vec3(3.0, 5.0, 6.0), 0.1), 1));
-    v = Unite(v, Value(max(sdRoundBox(p + vec3(0.0, -3.0, 0.0), vec3(4.0, 1.0, 7.0), 0.5), -(p.y - 3.0)), 0));
+    v = Unite(v, Value(max(sdRoundBox(p + vec3(0.0, -3.0, 0.0), vec3(4.0, 1.0, 7.0), 0.5), -(p.y - 2.99)), 0));
     v = Unite(v, Value(sdSphere(p + first_sphere_pos, 1.0), 2));
     v = Unite(v, Value(sdSphere(p + last_sphere_pos, 1.0), 2));
     v = Unite(v, Value(sdCapsule(vec3(0.0, 0.0, 0.0), p + first_cable_end_pos, p + vec3(3.0 - 0.1, -13.0 + 0.1, -4.0), 0.05), 4));
@@ -259,27 +211,11 @@ vec3 normal(vec3 p) {
 }
 
 
-TraceResult sphere_trace(Ray ray, SphereTraceDesc params) {
-    TraceResult ret = TraceResult(ray.Tmin, 0, 0);
-    float d;
-    do {
-        //d = abs(sdf(ray.P + ret.T * ray.V));
-        ret.T += d;
-        ret.steps++;
-    } while (ret.T < ray.Tmax &&            // Stay within bound box
-             d > params.epsilon * ret.T &&  // Stop if cone is close to surface
-             ret.steps < params.maxiters    // Stop if too many iterations
-    );
-    ret.flags = int(ret.T >= ray.Tmax) | (int(d <= params.epsilon * ret.T) << 1) | (int(ret.steps >= params.maxiters) << 2);
-    return ret;
-}
-
 
 void sphere_trace(Ray ray, SphereTraceDesc params, inout TraceResult tr) {
     float d;
     Value v;
     do {
-        //d = abs(sdf(ray.P + tr.T * ray.V));
         v = sdf(ray.P + tr.T * ray.V);
         d = abs(v.d);
         tr.T += d;
@@ -291,12 +227,110 @@ void sphere_trace(Ray ray, SphereTraceDesc params, inout TraceResult tr) {
     tr.flags = int(tr.T >= ray.Tmax) | (int(d <= params.epsilon * tr.T) << 1) | (int(tr.steps >= params.maxiters) << 2) | (int(v.id << 3));
 }
 
+float sphere_trace(Ray ray, SphereTraceDesc params, float penumbra) {
+    TraceResult tr = TraceResult(ray.Tmin, 0, 0);
+    float min_d = 1.0;
+    float d;
+    Value v;
+    do {
+        v = sdf(ray.P + tr.T * ray.V);
+        d = abs(v.d);
+        min_d = min(min_d, ((d * penumbra) / tr.T));
+        tr.T += d;
+        tr.steps++;
+    } while (tr.T < ray.Tmax &&            // Stay within bound box
+             d > params.epsilon * tr.T &&  // Stop if cone is close to surface
+             tr.steps < params.maxiters    // Stop if too many iterations
+    );
+    return min_d;
+}
+
+float SoftShadow(vec3 pos, vec3 light_pos) {
+    const float penumbra = 10.0;
+    const float intensity = 1.0;
+    
+    SphereTraceDesc params = SphereTraceDesc(0.01, SHADOW_MAX_ITERS);
+    Ray ray = Ray(pos, 0.0, normalize(light_pos - pos), min(MAX_DIST, length(light_pos - pos)));
+
+    float min_d = sphere_trace(ray, params, penumbra);
+    
+    return pow(min_d, intensity);
+}
+
+// stolen from: https://learnopengl.com/PBR/Lighting
+vec3 BRDF(vec3 camPos, vec3 WorldPos, vec3 Normal, int mat_id, bool with_shadow, inout vec3 refl) {
+    vec3 albedo = materials[mat_id].color;
+    float roughness = materials[mat_id].roughness;
+    float emission_strength = materials[mat_id].emission_strength;
+    float metallic = materials[mat_id].metalness;
+
+
+    const float ao = 0.1;
+    const float reflection_attenuation = 1.0;
+
+    vec3 N = normalize(Normal);
+    vec3 V = normalize(camPos - WorldPos);
+
+    vec3 F0 = vec3(0.04);
+    F0 = mix(F0, albedo, metallic);
+
+    // reflectance equation
+    vec3 Lo = vec3(0.0);
+    for (int i = 0; i < NUM_OF_LIGHTS; ++i) {
+        vec3 lightPosition = lights[i].position;
+        vec3 lightColor = lights[i].color;
+        // calculate per-light radiance
+        vec3 L = normalize(lightPosition - WorldPos);
+        vec3 H = normalize(V + L);
+        float dist = length(lightPosition - WorldPos);
+        float attenuation = 1.0 / (dist * dist);
+        vec3 radiance = lightColor * attenuation;
+
+        // cook-torrance brdf
+        float NDF = DistributionGGX(N, H, roughness);
+        float G = GeometrySmith(N, V, L, roughness);
+        vec3 F = fresnelSchlick(max(dot(H, V), 0.0), F0);
+
+        vec3 kS = F;
+        vec3 kD = vec3(1.0) - kS;
+        kD *= (1.0 - metallic);
+
+        vec3 numerator = NDF * G * F;
+        float denominator = 4.0 * max(dot(N, V), 0.0) * max(dot(N, L), 0.0) + 0.0001;
+        vec3 specular = numerator / denominator;
+
+        // add to outgoing radiance Lo
+        float NdotL = max(dot(N, L), 0.0);
+
+        if (with_shadow) {
+            float shadow = SoftShadow((WorldPos + Normal * 0.0001), lightPosition);
+            Lo += (kD * albedo / pi + specular) * radiance * NdotL * shadow;
+        } else {
+            Lo += (kD * albedo / pi + specular) * radiance * NdotL;
+        }
+
+    }
+
+    vec3 ambient = vec3(0.03) * albedo * ao;
+    vec3 color = ambient + Lo + albedo * emission_strength * max(dot(V, N), 0.0);
+
+    color = color / (color + vec3(1.0));
+    color = pow(color, vec3(1.0 / 2.2));
+
+    color *= refl;
+    refl *= fresnelSchlick(max(dot(V, N), 0.0), F0) * reflection_attenuation;
+
+    return color;
+}
+
+
+
 vec3 Render(Ray ray, SphereTraceDesc params) {
     vec3 col = vec3(0.0);
     vec3 refl = vec3(1.0);
 
     TraceResult tr = TraceResult(ray.Tmin, 0, 0);
-    for (int i = 0; i < 7; i++) {
+    for (int i = 0; i < (NUM_OF_REFLECTIONS + 1); i++) {
         sphere_trace(ray, params, tr);
 
         if (bool(tr.flags & 1)) {
@@ -306,7 +340,7 @@ vec3 Render(Ray ray, SphereTraceDesc params) {
             int mat_id = (tr.flags >> 3) & 0xFF;
             vec3 pos = ray.P + ray.V * tr.T;
             vec3 norm = normal(pos);
-            col += BRDF(ray.P, pos, norm, mat_id, refl);
+            col += BRDF(ray.P, pos, norm, mat_id, (i == 0), refl);
 
             ray.P = pos + 0.0001 * norm; // small offset so next sdf doesn't return 0
             ray.V = reflect(ray.V, norm);
@@ -329,11 +363,13 @@ vec3 Render(Ray ray, SphereTraceDesc params) {
     return col;
 }
 
+
+
 void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     float epsilon;
     Ray ray = ReadCamera(fragCoord, epsilon);
 
-    SphereTraceDesc params = SphereTraceDesc(epsilon, 1064);
+    SphereTraceDesc params = SphereTraceDesc(epsilon, IMAGE_MAX_ITERS);
     // TraceResult ret = sphere_trace(ray, params);
 
     vec3 color = Render(ray, params);
