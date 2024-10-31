@@ -12,6 +12,7 @@ const int KeyUp = 87;
 const int KeyDown = 83;
 const int KeyE = 69;
 const int KeyQ = 81;
+const int KeyT = 84;
 
 #else
 
@@ -30,6 +31,7 @@ const int KeyUp = Key_W;
 const int KeyDown = Key_S;
 const int KeyE = Key_E;
 const int KeyQ = Key_Q;
+const int KeyT = Key_T;
 
 
 #endif
@@ -92,6 +94,15 @@ vec4 UpdateCamera(vec2 fragCoord) {
         eye.y -= speed;
     }
 
+    vec4 data3 = texelFetch(iChannel0, ivec2(0, 1), 0);
+    vec4 data4 = texelFetch(iChannel0, ivec2(1, 1), 0);
+    vec3 ray_p = data3.xyz;
+    vec3 ray_v = data4.xyz;
+    if (isKeyDown(KeyT)) {
+        ray_p = eye;
+        ray_v = normalize(w);
+    }
+
     vec2 outdata = vec2(data1.w, data2.w);
     if (iMouse.z >= 0.0) {
         outdata = abs(vec2(outdata));  // mouse held
@@ -103,8 +114,14 @@ vec4 UpdateCamera(vec2 fragCoord) {
     if (fragCoord.x == 0.5 && fragCoord.y == 0.5) { // pixel (0,0)
         fragColor = vec4(eye - EyeStartPosition, outdata.x);
     }
-    if (fragCoord.x == 1.5 && fragCoord.y == 0.5) {  // pixel (1,0)
+    if (fragCoord.x == 1.5 && fragCoord.y == 0.5) { // pixel (1,0)
         fragColor = vec4(w, outdata.y);
+    }
+    if (fragCoord.x == 0.5 && fragCoord.y == 1.5) { // pixel (0,1)
+        fragColor = vec4(ray_p, 0.0);
+    }
+    if (fragCoord.x == 1.5 && fragCoord.y == 1.5) { // pixel (1,1)
+        fragColor = vec4(ray_v, 0.0);
     }
 
     return fragColor;
@@ -112,7 +129,7 @@ vec4 UpdateCamera(vec2 fragCoord) {
 
 void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     //Generate ray from pixel
-    if (fragCoord.x > 1.5 || fragCoord.y > 0.5) { 
+    if (fragCoord.x > 1.5 || fragCoord.y > 1.5) { 
         discard;
     }
 
