@@ -16,12 +16,11 @@
 
 #endif
 
-#define NUM_OF_REFLECTIONS 6
+#define NUM_OF_REFLECTIONS 5
 
-#define IMAGE_MAX_ITERS 300
-#define SHADOW_MAX_ITERS 100
+#define IMAGE_MAX_ITERS 150
+#define SHADOW_MAX_ITERS 40
 
-#define MAX_DIST 1000.0
 
 #define NUM_OF_MATERIALS 6
 #define NUM_OF_LIGHTS 3
@@ -41,6 +40,8 @@ const Light lights[NUM_OF_LIGHTS] = Light[](
     Light(vec3(0.0, 10.0, 0.0), vec3(0.0, 10.0, 0.0)), 
     Light(vec3(0.0, 10.0, 10.0), vec3(0.0, 0.0, 1.0))
 );
+
+
 
 
 
@@ -79,6 +80,7 @@ vec3 fresnelSchlick(float cosTheta, vec3 F0) {
 }
 
 
+
 // Buffer A handels camera movement. Here we only read it
 Ray ReadCamera(vec2 fragCoord, out float diagInv) {
     vec4 data1 = texelFetch(iChannel0, ivec2(0, 0), 0);
@@ -96,127 +98,192 @@ Ray ReadCamera(vec2 fragCoord, out float diagInv) {
     return Ray(eye, 0.0, normalize(w + px.x * u + px.y * v), MAX_DIST);
 }
 
-
-
-// SDF Primitives (more on https://iquilezles.org/articles/distfunctions/)
-float sdRoundBox(vec3 p, vec3 b, float r) {
-    vec3 q = abs(p) - b + r;
-    return length(max(q, 0.0)) + min(max(q.x, max(q.y, q.z)), 0.0) - r;
-}
-float sdBoxFrame(vec3 p, vec3 b, float e) {
-    p = abs(p) - b;
-    vec3 q = abs(p + e) - e;
-    return min(min(length(max(vec3(p.x, q.y, q.z), 0.0)) + min(max(p.x, max(q.y, q.z)), 0.0), length(max(vec3(q.x, p.y, q.z), 0.0)) + min(max(q.x, max(p.y, q.z)), 0.0)), length(max(vec3(q.x, q.y, p.z), 0.0)) + min(max(q.x, max(q.y, p.z)), 0.0));
-}
-float sdCapsule(vec3 p, vec3 a, vec3 b, float r) {
-    vec3 pa = p - a, ba = b - a;
-    float h = clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0);
-    return length(pa - ba * h) - r;
-}
-float sdSphere(vec3 p, float s) {
-    return length(p) - s;
-}
-float sdBox(vec3 p, vec3 b) {
-    vec3 d = abs(p) - b;
-    return length(max(d, 0.0)) + min(max3(d.x, d.y, d.z), 0.0);
+Ray ReadVisRay() {
+    vec4 data1 = texelFetch(iChannel0, ivec2(0, 1), 0);
+    vec4 data2 = texelFetch(iChannel0, ivec2(1, 1), 0);
+    Ray ray = Ray(data1.xyz, 0.0, data2.xyz, MAX_DIST);
+    return ray;
 }
 
 
-
-// SDF Operations
-vec3 opRepLim(vec3 p, float c, in vec3 l) {
-    return p - c * clamp(round(p / c), -l, l);
-}
-vec3 opRep(vec3 p, float s) {
-    return mod(p + s * 0.5, s) - s * 0.5;
-}
-vec3 opSymX(vec3 p) {
-    return vec3(abs(p.x), p.y, p.z);
-}
-vec3 opRepZ(vec3 p, float sz, float lo, float up) {
-    return vec3(p.x, p.y, p.z - sz * clamp(round(p.z / sz), lo, up));
-}
-vec3 opRepXZ(vec3 p, float sx, float sz) {
-    return vec3((mod(p.x + sx * 0.5, sx) - sx * 0.5), p.y, (mod(p.z + sz * 0.5, sz) - sz * 0.5));
-}
-float intersectPlane(Ray ray, vec3 q, vec3 n) {
-    return dot(q - ray.P, n) / dot(ray.V, n);
-}
-
-
-
-float pendulum(float t) {
-    // const float q = 0.0;                   // initial angle: 0
-    // const float q = 0.0004765699168668419; // initial angle: 10
-    // const float q = 0.0019135945901703004; // initial angle: 20
-    // const float q = 0.004333420509983138;  // initial angle: 30
-    // const float q = 0.007774680416441802;  // initial angle: 40
-    // const float q = 0.01229456052718145;   // initial angle: 50
-    const float q = 0.017972387008967222;  // initial angle: 60
-    // const float q = 0.02491506252398093;   // initial angle: 70
-    // const float q = 0.03326525669557733;   // initial angle: 80
-    // const float q = 0.04321391826377224;   // initial angle: 90
-
-    float theta = 8.0 * (pow(q, 0.5) / (1.0 + pow(q, 1.0))) * cos(1.0 * t) 
-                + -2.6666666666666665 * (pow(q, 1.5) / (1.0 + pow(q, 3.0))) * cos(3.0 * t) 
-                + 1.6 * (pow(q, 2.5) / (1.0 + pow(q, 5.0))) * cos(5.0 * t);
-    //            + -1.1428571428571428 * (pow(q, 3.5) / (1.0 + pow(q, 7.0))) * cos(7.0 * t)
-    //            + 0.8888888888888888  * (pow(q, 4.5) / (1.0 + pow(q, 9.0))) * cos(9.0 * t)
-    //            + -0.7272727272727273 * (pow(q, 5.5) / (1.0 + pow(q, 11.0))) * cos(11.0 * t);
-
-    return theta;
-}
-
-
+//float RaySphereIntersect(Ray ray, vec3 o, float r) {
+//    // rax.V should be normalized
+//    float b = dot(ray.V, (ray.P - o));
+//    float c = dot((ray.P - o), (ray.P - o)) - r * r;
+//    float d = b * b - c;
+//
+//    float t1 = -b - sqrt(max(d, 0.0));
+//
+//    return (d < 0.0 || t1 < 0.0) ? MAX_DIST : t1; 
+//}
+//
+//Value sdfSpheres(Ray ray, vec4 vis_spheres[VIS_RAY_MAX_ITERS]) {
+//    Value v = Value(MAX_DIST, 0);
+//    for (int i = 0; i < VIS_RAY_MAX_ITERS; i++) {
+//        vec3 pos = vis_spheres[i].xyz;
+//        float r = vis_spheres[i].w;
+//        v = Unite(v, Value(RaySphereIntersect(ray, pos, r), (i % NUM_OF_MATERIALS)));
+//    }
+//    return v;
+//}
+//
+//float RaySphereMinDist(Ray ray, vec3 o , float r)  {
+//    return max(0.0, length(o - ray.P + dot((o - ray.P), ray.V) * ray.V) - r);
+//}
+//
+//float SphereMinDist(Ray ray, vec4 vis_spheres[VIS_RAY_MAX_ITERS], float penumbra) {
+//    float min_d = 1.0;
+//    for (int i = 0; i < VIS_RAY_MAX_ITERS; i++) {
+//        vec3 pos = vis_spheres[i].xyz;
+//        float r = vis_spheres[i].w;
+//        float d = RaySphereMinDist(ray, pos , r);
+//        min_d = min(min_d, (d * penumbra) / (dot((pos - ray.P), ray.V)))
+//    }
+//    return min_d;
+//}
 
 // Signed Distance Function
-Value sdf(vec3 p) {
-    const float freq = 2.0;
-
-    float first_sphere_angle = pendulum(clamp(mod(freq * iTime, 2.0 * pi), 0.5 * pi, 1.5 * pi) + pi);
-    float last_sphere_angle = pendulum(clamp(mod(freq * iTime + pi, 2.0 * pi), 0.5 * pi, 1.5 * pi));
-
-    vec3 first_sphere_pos =    vec3(0.0, -13.0 + 7.0 * cos(first_sphere_angle), -4.0 - 7.0 * sin(first_sphere_angle));
-    vec3 last_sphere_pos =     vec3(0.0, -13.0 + 7.0 * cos(last_sphere_angle),   4.0 - 7.0 * sin(last_sphere_angle));
-    vec3 first_cable_end_pos = vec3(0.0, -13.0 + 6.0 * cos(first_sphere_angle), -4.0 - 6.0 * sin(first_sphere_angle));
-    vec3 last_cable_end_pos =  vec3(0.0, -13.0 + 6.0 * cos(last_sphere_angle),   4.0 - 6.0 * sin(last_sphere_angle));
-
-    p = vec3(p.x, p.y + 10.0, p.z);
-
-    float d = 10000.0;
-    Value v = Value(10000.0, 0);
-    v = Unite(v, Value(sdBoxFrame(p + vec3(0.0, -8.0, 0.0), vec3(3.0, 5.0, 6.0), 0.1), 1));
-    v = Unite(v, Value(max(sdRoundBox(p + vec3(0.0, -3.0, 0.0), vec3(4.0, 1.0, 7.0), 0.5), -(p.y - 2.99)), 0));
-    v = Unite(v, Value(sdSphere(p + first_sphere_pos, 1.0), 2));
-    v = Unite(v, Value(sdSphere(p + last_sphere_pos, 1.0), 2));
-    v = Unite(v, Value(sdCapsule(vec3(0.0, 0.0, 0.0), p + first_cable_end_pos, p + vec3(3.0 - 0.1, -13.0 + 0.1, -4.0), 0.05), 4));
-    v = Unite(v, Value(sdCapsule(vec3(0.0, 0.0, 0.0), p + first_cable_end_pos, p + vec3(-3.0 + 0.1, -13.0 + 0.1, -4.0), 0.05), 4));
-    v = Unite(v, Value(sdCapsule(vec3(0.0, 0.0, 0.0), p + last_cable_end_pos, p + vec3(3.0 - 0.1, -13.0 + 0.1, 4.0), 0.05), 4));
-    v = Unite(v, Value(sdCapsule(vec3(0.0, 0.0, 0.0), p + last_cable_end_pos, p + vec3(-3.0 + 0.1, -13.0 + 0.1, 4.0), 0.05), 4));
-    vec3 p_rep_z = opRepZ(p, 2.0, -1.0, 1.0);
-    vec3 p_rep_sym_x = opSymX(p_rep_z);
-    v = Unite(v, Value(sdSphere(p_rep_z + vec3(0.0, -6.0, 0.0), 1.0), 2));
-    v = Unite(v, Value(sdCapsule(vec3(0.0, 0.0, 0.0), p_rep_z + vec3(0.0, -7.0, 0.0), p_rep_z + vec3(3.0 - 0.1, -13.0 + 0.1, 0.0), 0.05), 4));
-    v = Unite(v, Value(sdCapsule(vec3(0.0, 0.0, 0.0), p_rep_z + vec3(0.0, -7.0, 0.0), p_rep_z + vec3(-3.0 + 0.1, -13.0 + 0.1, 0.0), 0.05), 4));
-
+Value sdf(vec3 p, vec4 vis_spheres[VIS_RAY_MAX_ITERS]) {
+    Value v = SceneSDF(p);
+    for (int i = 0; i < VIS_RAY_MAX_ITERS; i++) {
+        vec3 pos = vis_spheres[i].xyz;
+        float r = vis_spheres[i].w;
+        v = Unite(v, Value(sdSphere(p - pos, r), 2));
+    }
     return v;
 }
 
 // symmetric differential
-vec3 normal(vec3 p) {
+vec3 normal(vec3 p, vec4 vis_spheres[VIS_RAY_MAX_ITERS]) {
     const vec2 eps0 = vec2(0.01, 0);
-    vec3 m0 = vec3(sdf(p - eps0.xyy).d, sdf(p - eps0.yxy).d, sdf(p - eps0.yyx).d);
-    vec3 m1 = vec3(sdf(p + eps0.xyy).d, sdf(p + eps0.yxy).d, sdf(p + eps0.yyx).d);
+    vec3 m0 = vec3(sdf(p - eps0.xyy, vis_spheres).d, sdf(p - eps0.yxy, vis_spheres).d, sdf(p - eps0.yyx, vis_spheres).d);
+    vec3 m1 = vec3(sdf(p + eps0.xyy, vis_spheres).d, sdf(p + eps0.yxy, vis_spheres).d, sdf(p + eps0.yyx, vis_spheres).d);
     return normalize(m1 - m0);
 }
 
 
 
-void sphere_trace(Ray ray, SphereTraceDesc params, inout TraceResult tr) {
+void relaxed_sphere_trace_vis_ray(Ray ray, SphereTraceDesc params, inout vec4 vis_spheres[VIS_RAY_MAX_ITERS]) {
+    TraceResult tr = TraceResult(ray.Tmin, 0, 0);
+    const float w = 1.6;
+
+    float d;
+    Value v;
+
+    float next_d;
+    Value next_v;
+    float next_t;
+
+    v = SceneSDF(ray.P + tr.T * ray.V);
+    d = abs(v.d);
+    while (tr.T < ray.Tmax &&        // Stay within bound box
+           d > params.epsilon * tr.T &&  // Stop if cone is close to surface
+           tr.steps < params.maxiters    // Stop if too many iterations)
+    ) {
+        next_t = tr.T + w * d;
+        next_v = SceneSDF(ray.P + next_t * ray.V);
+        next_d = abs(next_v.d);
+        if ((d + next_d) < w * d) {
+            next_t = tr.T + d; 
+            next_v = SceneSDF(ray.P + next_t * ray.V);
+            next_d = abs(next_v.d);       
+        }
+        vis_spheres[tr.steps] = vec4((ray.P + tr.T * ray.V), d);
+        tr.T = next_t;
+        v = next_v;
+        d = next_d;
+        tr.steps++;
+    }    
+}
+
+void relaxed_sphere_trace(Ray ray, SphereTraceDesc params, vec4 vis_spheres[VIS_RAY_MAX_ITERS], inout TraceResult tr) {
+    const float w = 1.6;
+
+    float d;
+    Value v;
+
+    float next_d;
+    Value next_v;
+    float next_t;
+
+    v = sdf(ray.P + tr.T * ray.V, vis_spheres);
+    d = abs(v.d);
+    while (tr.T < ray.Tmax &&            // Stay within bound box
+           d > params.epsilon * tr.T &&  // Stop if cone is close to surface
+           tr.steps < params.maxiters    // Stop if too many iterations)
+    ) {
+        next_t = tr.T + w * d;
+        next_v = sdf(ray.P + next_t * ray.V, vis_spheres);
+        next_d = abs(next_v.d);
+        if ((d + next_d) < w * d) {
+            next_t = tr.T + d; 
+            next_v = sdf(ray.P + next_t * ray.V, vis_spheres);
+            next_d = abs(next_v.d);       
+        }
+        tr.T = next_t;
+        v = next_v;
+        d = next_d;
+        tr.steps++;
+    }    
+    tr.flags = int(tr.T >= ray.Tmax) | (int(d <= params.epsilon * tr.T) << 1) | (int(tr.steps >= params.maxiters) << 2) | (int(v.id << 3));
+}
+
+float relaxed_sphere_trace_shadow(Ray ray, SphereTraceDesc params, float penumbra, vec4 vis_spheres[VIS_RAY_MAX_ITERS]) {
+    TraceResult tr = TraceResult(ray.Tmin, 0, 0);
+    const float w = 1.6;
+
+    float min_d = 1.0;
+    float d;
+    Value v;
+
+    float next_d;
+    Value next_v;
+    float next_t;
+
+    v = sdf(ray.P + tr.T * ray.V, vis_spheres);
+    d = abs(v.d);
+    while (tr.T < ray.Tmax &&        // Stay within bound box
+           d > params.epsilon * tr.T &&  // Stop if cone is close to surface
+           tr.steps < params.maxiters    // Stop if too many iterations)
+    ) {
+        next_t = tr.T + w * d;
+        next_v = sdf(ray.P + next_t * ray.V, vis_spheres);
+        next_d = abs(next_v.d);
+        if ((d + next_d) < w * d) {
+            next_t = tr.T + d; 
+            next_v = sdf(ray.P + next_t * ray.V, vis_spheres);
+            next_d = abs(next_v.d);       
+        }
+        min_d = min(min_d, ((d * penumbra) / tr.T));
+        tr.T = next_t;
+        v = next_v;
+        d = next_d;
+        tr.steps++;
+    }    
+    return min_d;
+}
+
+void sphere_trace_vis_ray(Ray ray, SphereTraceDesc params, inout vec4 vis_spheres[VIS_RAY_MAX_ITERS]) {
+    TraceResult tr = TraceResult(ray.Tmin, 0, 0);
     float d;
     Value v;
     do {
-        v = sdf(ray.P + tr.T * ray.V);
+        v = SceneSDF(ray.P + tr.T * ray.V);
+        d = abs(v.d);
+        vis_spheres[tr.steps] = vec4((ray.P + tr.T * ray.V), d);
+        tr.T += d;
+        tr.steps++;
+    } while (tr.T < ray.Tmax &&         // Stay within bound box
+             d > params.epsilon * tr.T &&   // Stop if cone is close to surface
+             tr.steps < params.maxiters     // Stop if too many iterations
+    );
+}
+
+void sphere_trace(Ray ray, SphereTraceDesc params, vec4 vis_spheres[VIS_RAY_MAX_ITERS], inout TraceResult tr) {
+    float d;
+    Value v;
+    do {
+        v = sdf(ray.P + tr.T * ray.V, vis_spheres);
         d = abs(v.d);
         tr.T += d;
         tr.steps++;
@@ -227,13 +294,13 @@ void sphere_trace(Ray ray, SphereTraceDesc params, inout TraceResult tr) {
     tr.flags = int(tr.T >= ray.Tmax) | (int(d <= params.epsilon * tr.T) << 1) | (int(tr.steps >= params.maxiters) << 2) | (int(v.id << 3));
 }
 
-float sphere_trace(Ray ray, SphereTraceDesc params, float penumbra) {
+float sphere_trace_shadow(Ray ray, SphereTraceDesc params, float penumbra, vec4 vis_spheres[VIS_RAY_MAX_ITERS]) {
     TraceResult tr = TraceResult(ray.Tmin, 0, 0);
     float min_d = 1.0;
     float d;
     Value v;
     do {
-        v = sdf(ray.P + tr.T * ray.V);
+        v = sdf(ray.P + tr.T * ray.V, vis_spheres);
         d = abs(v.d);
         min_d = min(min_d, ((d * penumbra) / tr.T));
         tr.T += d;
@@ -245,20 +312,21 @@ float sphere_trace(Ray ray, SphereTraceDesc params, float penumbra) {
     return min_d;
 }
 
-float SoftShadow(vec3 pos, vec3 light_pos) {
+float SoftShadow(vec3 pos, vec3 light_pos, vec4 vis_spheres[VIS_RAY_MAX_ITERS]) {
     const float penumbra = 10.0;
     const float intensity = 1.0;
     
     SphereTraceDesc params = SphereTraceDesc(0.01, SHADOW_MAX_ITERS);
     Ray ray = Ray(pos, 0.0, normalize(light_pos - pos), min(MAX_DIST, length(light_pos - pos)));
 
-    float min_d = sphere_trace(ray, params, penumbra);
+    float min_d = relaxed_sphere_trace_shadow(ray, params, penumbra, vis_spheres);
+
     
     return pow(min_d, intensity);
 }
 
 // stolen from: https://learnopengl.com/PBR/Lighting
-vec3 BRDF(vec3 camPos, vec3 WorldPos, vec3 Normal, int mat_id, bool with_shadow, inout vec3 refl) {
+vec3 BRDF(vec3 camPos, vec3 WorldPos, vec3 Normal, int mat_id, bool with_shadow, vec4 vis_spheres[VIS_RAY_MAX_ITERS], inout vec3 refl) {
     vec3 albedo = materials[mat_id].color;
     float roughness = materials[mat_id].roughness;
     float emission_strength = materials[mat_id].emission_strength;
@@ -303,7 +371,7 @@ vec3 BRDF(vec3 camPos, vec3 WorldPos, vec3 Normal, int mat_id, bool with_shadow,
         float NdotL = max(dot(N, L), 0.0);
 
         if (with_shadow) {
-            float shadow = SoftShadow((WorldPos + Normal * 0.0001), lightPosition);
+            float shadow = SoftShadow((WorldPos + Normal * 0.0001), lightPosition, vis_spheres);
             Lo += (kD * albedo / pi + specular) * radiance * NdotL * shadow;
         } else {
             Lo += (kD * albedo / pi + specular) * radiance * NdotL;
@@ -325,13 +393,22 @@ vec3 BRDF(vec3 camPos, vec3 WorldPos, vec3 Normal, int mat_id, bool with_shadow,
 
 
 
-vec3 Render(Ray ray, SphereTraceDesc params) {
+vec3 Render(Ray ray, Ray vis_ray, SphereTraceDesc params) {
     vec3 col = vec3(0.0);
     vec3 refl = vec3(1.0);
 
+    vec4 vis_spheres[VIS_RAY_MAX_ITERS];
+    for (int i = 0; i < VIS_RAY_MAX_ITERS; i++) {
+        vis_spheres[i] = vec4(0.0);
+    }
+    SphereTraceDesc vis_params = SphereTraceDesc(0.001, VIS_RAY_MAX_ITERS);
+    relaxed_sphere_trace_vis_ray(vis_ray, vis_params, vis_spheres);
+ 
+
     TraceResult tr = TraceResult(ray.Tmin, 0, 0);
     for (int i = 0; i < (NUM_OF_REFLECTIONS + 1); i++) {
-        sphere_trace(ray, params, tr);
+        relaxed_sphere_trace(ray, params, vis_spheres, tr);
+        
 
         if (bool(tr.flags & 1)) {
             col += refl * texture(iChannel2, ray.V).rgb;
@@ -339,8 +416,8 @@ vec3 Render(Ray ray, SphereTraceDesc params) {
         } else if (bool(tr.flags & 2)) {
             int mat_id = (tr.flags >> 3) & 0xFF;
             vec3 pos = ray.P + ray.V * tr.T;
-            vec3 norm = normal(pos);
-            col += BRDF(ray.P, pos, norm, mat_id, (i == 0), refl);
+            vec3 norm = normal(pos, vis_spheres);
+            col += BRDF(ray.P, pos, norm, mat_id, (i == 0), vis_spheres, refl);
 
             ray.P = pos + 0.0001 * norm; // small offset so next sdf doesn't return 0
             ray.V = reflect(ray.V, norm);
@@ -369,10 +446,11 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     float epsilon;
     Ray ray = ReadCamera(fragCoord, epsilon);
 
+    Ray vis_ray = ReadVisRay();
+
     SphereTraceDesc params = SphereTraceDesc(epsilon, IMAGE_MAX_ITERS);
-    // TraceResult ret = sphere_trace(ray, params);
 
-    vec3 color = Render(ray, params);
-    fragColor = vec4(Render(ray, params), 1.0);
+    vec3 color = Render(ray, vis_ray, params);
 
+    fragColor = vec4(color, 1.0);
 }
